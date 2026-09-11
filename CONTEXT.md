@@ -23,7 +23,7 @@ custom fields).
 Vanilla JS, no framework. File is organized in commented sections:
 
 ```
-STATE → STORAGE → UTILS → ICONS → SCREENS → SHEETS → ROUTER → ACTIONS → INIT
+STATE → STORAGE → UTILS → ICONS → OWNER'S MANUAL DATA → SCREENS → SHEETS → ROUTER → ACTIONS → INIT
 ```
 
 - `STATE` is a single mutable object. `render()` rebuilds `#app` innerHTML from it.
@@ -34,6 +34,7 @@ STATE → STORAGE → UTILS → ICONS → SCREENS → SHEETS → ROUTER → ACTI
 - `loadState()` is async — `INIT` is `loadState().then(render)`.
 - Vehicle shape: `{id, year, make, model, trim, plate, mileage, unit, vin, note,
   heroPhoto, heroFloating, photos[], services[], reminders[]}`
+- `vehicle.manual` is an optional key into `MANUALS` (see below).
 - Service: `{id, title, date, mileage, cost, note}`. Reminder:
   `{id, title, dueDate, dueMileage, done, completedAt}`. Dates are ms timestamps
   at **local** midnight — always go through `fromDateInput` / `toDateInput`.
@@ -49,6 +50,22 @@ STATE → STORAGE → UTILS → ICONS → SCREENS → SHEETS → ROUTER → ACTI
 - `toast()` writes to `#toast`, outside `#app`, so it never triggers a render.
 - The carousel index is read off the live DOM at the top of `render()` so
   Home → Services → Home lands on the same car.
+
+## Owner's manual data
+
+`MANUALS` holds hand-pulled data from techinfo.honda.com for the two cars in
+the garage (2023 CR-V Hybrid, 2023 Accord Hybrid): specs (oil, plugs, tires,
+fluids), which Maintenance Minder codes apply, the manual URL, and the manual's
+two calendar rules (oil ≤ 12 months, brake fluid ≤ 3 years — the Minder itself
+only tracks mileage/condition). `MINDER_CODES` is the shared A/B/1–7 decoder.
+
+A vehicle opts in via the "Owner's manual data" select in its form
+(auto-suggested from make/model). With a manual set, Overview shows a Minder
+decoder (type "B12" → what's due → "Log this service" pre-fills the entry) and
+a specs list; the Reminders tab offers to add the timed reminders.
+
+Adding another car = another `MANUALS` entry. The source pages are behind a
+terms-of-use click on Honda's site; the numbers were transcribed, not scraped.
 
 ## Design language
 

@@ -289,6 +289,82 @@ h2.section-title {
   line-height: 1.5;
 }
 
+/* Owner's-manual data: specs list, Maintenance Minder decoder */
+.spec-list {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.spec-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.spec-row:last-child { border-bottom: none; }
+.spec-row .k {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding-top: 3px;
+  flex-shrink: 0;
+}
+.spec-row .v { text-align: right; color: var(--text); line-height: 1.4; }
+.minder {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.minder .input {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+}
+.minder-out { margin-top: 14px; }
+.minder-item {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.minder-item .code {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  color: var(--accent);
+  width: 22px;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+.minder-item .what { font-size: 14px; line-height: 1.45; }
+.minder-item .what small { display: block; color: var(--text-3); font-size: 12px; margin-top: 2px; }
+.minder-item.unknown .code { color: var(--danger); }
+.minder-legend {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+.minder-legend b { color: var(--text-2); font-family: 'JetBrains Mono', monospace; font-weight: 500; }
+.link-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  margin-top: 12px;
+}
+
 /* ============================================================
    GARAGE / VEHICLES — "garage stall" cards
 ============================================================ */
@@ -1216,6 +1292,7 @@ const STATE = {
   _tentativeHeroFloating: undefined,
   _tentativeHeroOriginal: null,     // pre-cutout photo, so "use original" can revert
   _heroBusy: null,                  // progress text while the cutout runs
+  _minderCode: '',                  // what's typed in the Maintenance Minder box
 };
 
 /* =========================================================
@@ -1527,6 +1604,120 @@ function carouselIndex(carousel) {
   return bestIdx;
 }
 
+/* =========================================================
+   OWNER'S MANUAL DATA
+   Hand-pulled from techinfo.honda.com. Both 2023 hybrids share the 2.0 L
+   Atkinson engine + e-CVT, so the Minder codes and most fluids match.
+   The Maintenance Minder is a *mileage/condition* system — the only fixed
+   calendar rules in the manual are the two footnotes captured in `timed`.
+========================================================= */
+const MINDER_CODES = {
+  A: { title: 'Replace engine oil' },
+  B: { title: 'Replace engine oil and oil filter',
+       sub: 'Inspect front/rear brakes, tie rod ends, steering gearbox & boots, suspension, driveshaft boots, brake hoses & lines, all fluid levels, exhaust, fuel lines. Check tire repair kit bottle expiration.' },
+  1: { title: 'Rotate tires' },
+  2: { title: 'Replace engine air cleaner element and cabin (dust & pollen) filter',
+       sub: 'Every 15,000 mi if you drive in dusty or sooty urban conditions.' },
+  3: { title: 'Replace transmission fluid',
+       sub: 'Every 47,500 mi / 3 yr if you regularly drive slowly in mountains.' },
+  4: { title: 'Replace spark plugs' },
+  5: { title: 'Replace engine coolant' },
+  6: { title: 'Replace rear differential fluid', awdOnly: true },
+  7: { title: 'Replace brake fluid', sub: 'Every 3 years regardless of Minder.' },
+};
+
+const MANUALS = {
+  'crv-hybrid-2023': {
+    name: '2023 CR-V Hybrid',
+    match: v => /honda/i.test(v.make || '') && /cr-?v/i.test(v.model || ''),
+    url: 'https://techinfo.honda.com/rjanisis/pubs/om/ah/a3d42323iom/enu/index.html',
+    specs: [
+      ['Engine oil', '0W-20 — Honda Genuine or API SN+'],
+      ['Oil capacity', '3.9 qt · 4.2 qt with filter'],
+      ['Spark plugs', 'NGK DILZKAR7G11Y'],
+      ['Tires 18"', '235/60R18 103H · 35 psi F / 32 psi R'],
+      ['Tires 19"', '235/55R19 101H · 33 psi F / 33 psi R'],
+      ['Coolant', 'Honda Type 2, 50/50 · 1.51 gal'],
+      ['Brake fluid', 'Honda Heavy Duty DOT 3'],
+      ['Trans. fluid', 'Honda HEVF-Type 1 · 2.5 qt 2WD / 3.0 qt AWD'],
+      ['Rear diff (AWD)', 'Honda DPSF-II · 1.32 qt'],
+      ['Fuel', '87 octane · 14 gal tank'],
+      ['A/C', 'R-1234yf · 17.1–18.9 oz · ND-OIL 11'],
+      ['Bulbs', 'All LED except rear turn signal: 21 W amber'],
+      ['Washer fluid', '1.6 qt'],
+    ],
+    minder: ['A', 'B', 1, 2, 3, 4, 5, 6, 7],
+    timed: [
+      { title: 'Engine oil — 12-month max', months: 12 },
+      { title: 'Brake fluid — 3-year max', months: 36 },
+    ],
+  },
+  'accord-hybrid-2023': {
+    name: '2023 Accord Hybrid',
+    match: v => /honda/i.test(v.make || '') && /accord/i.test(v.model || ''),
+    url: 'https://techinfo.honda.com/rjanisis/pubs/OM/AH/A30B2323IOM/enu/index.HTM',
+    specs: [
+      ['Engine oil', '0W-20 — Honda Genuine or API SN+'],
+      ['Oil capacity', '3.9 qt · 4.2 qt with filter'],
+      ['Spark plugs', 'NGK DILZKAR7G11Y'],
+      ['Tires 17"', '225/50R17 94V · 33 psi F / 32 psi R'],
+      ['Tires 19"', '235/40R19 96V · 35 psi F / 32 psi R'],
+      ['Coolant', 'Honda Type 2, 50/50 · 1.49 gal'],
+      ['Brake fluid', 'Honda Heavy Duty DOT 3'],
+      ['Trans. fluid', 'Honda HEVF-Type 1 · 2.6 qt'],
+      ['Fuel', '87 octane · 12.8 gal tank'],
+      ['A/C', 'R-1234yf · 15.3–17.1 oz · ND-OIL 11'],
+      ['Bulbs', 'All LED'],
+      ['Washer fluid', '1.6 qt'],
+    ],
+    minder: ['A', 'B', 1, 2, 3, 4, 5, 7],
+    timed: [
+      { title: 'Engine oil — 12-month max', months: 12 },
+      { title: 'Brake fluid — 3-year max', months: 36 },
+    ],
+  },
+};
+
+function vehicleManual(v) {
+  return v.manual ? MANUALS[v.manual] : null;
+}
+
+function suggestManual(v) {
+  return Object.keys(MANUALS).find(k => MANUALS[k].match(v)) || '';
+}
+
+// "B12" -> [{code:'B', ...}, {code:1, ...}, {code:2, ...}]; unknown chars flagged
+function decodeMinder(code, manual) {
+  const chars = String(code || '').toUpperCase().replace(/[^AB0-9]/g, '').split('');
+  return chars.map(c => {
+    const key = /\d/.test(c) ? Number(c) : c;
+    const known = manual.minder.includes(key) && MINDER_CODES[key];
+    return known ? { code: c, ...MINDER_CODES[key] } : { code: c, unknown: true };
+  });
+}
+
+function minderOutputHTML(code, manual) {
+  const items = decodeMinder(code, manual);
+  if (!items.length) return '';
+  const html = items.map(i => i.unknown
+    ? `<div class="minder-item unknown"><div class="code">${i.code}</div><div class="what">Not a code for this car</div></div>`
+    : `<div class="minder-item"><div class="code">${i.code}</div><div class="what">${i.title}${i.sub ? `<small>${i.sub}</small>` : ''}</div></div>`
+  ).join('');
+  const valid = items.filter(i => !i.unknown);
+  return html + (valid.length ? `
+    <button class="btn-pill" style="margin-top:12px;width:100%;justify-content:center;" onclick="action.logMinderService()">
+      Log this service
+    </button>` : '');
+}
+
+// "B12" -> "Maintenance Minder B12 — engine oil and oil filter, rotate tires, …"
+function minderServiceTitle(code, manual) {
+  const valid = decodeMinder(code, manual).filter(i => !i.unknown);
+  if (!valid.length) return '';
+  const what = valid.map(i => i.title.replace(/^Replace /, '').replace(/^Rotate /, 'rotate '));
+  return `Maintenance Minder ${valid.map(i => i.code).join('')} — ${what.join(', ')}`;
+}
+
 // Build a friendly display name from year/make/model/trim
 function vehicleDisplayName(v) {
   const parts = [v.year, v.make, v.model].filter(Boolean);
@@ -1658,6 +1849,7 @@ function renderOverviewTab(v) {
     .sort((a, b) => reminderDueIn(v, a).sortKey - reminderDueIn(v, b).sortKey)
     .slice(0, 3);
   const totalSpent = (v.services || []).reduce((sum, s) => sum + (Number(s.cost) || 0), 0);
+  const manual = vehicleManual(v);
 
   return `
     ${recentService ? `
@@ -1671,6 +1863,23 @@ function renderOverviewTab(v) {
         <div class="val" style="font-size:14px;">${fmtDate(recentService.date)}</div>
       </div>
     </div>` : ''}
+
+    ${manual ? `
+      <h2 class="section-title">Maintenance Minder</h2>
+      <div class="minder">
+        <input class="input" id="minder-code" placeholder="Code on dash — e.g. B12" value="${escapeHtml(STATE._minderCode || '')}" oninput="action.setMinderCode(this.value)" autocapitalize="characters" autocomplete="off">
+        <div class="minder-out" id="minder-out">${minderOutputHTML(STATE._minderCode, manual)}</div>
+        <div class="minder-legend">
+          <b>A</b> oil · <b>B</b> oil + filter + inspection · <b>1</b> rotate tires · <b>2</b> air &amp; cabin filters · <b>3</b> trans. fluid · <b>4</b> spark plugs · <b>5</b> coolant${manual.minder.includes(6) ? ' · <b>6</b> rear diff' : ''} · <b>7</b> brake fluid
+        </div>
+      </div>
+
+      <h2 class="section-title">Specs</h2>
+      <div class="spec-list">
+        ${manual.specs.map(([k, val]) => `<div class="spec-row"><div class="k">${k}</div><div class="v">${val}</div></div>`).join('')}
+      </div>
+      <a class="link-row" href="${manual.url}" target="_blank" rel="noopener">Owner's manual ${ICON.chevron.replace('<svg', '<svg width="14" height="14"')}</a>
+    ` : ''}
 
     <h2 class="section-title">Notes</h2>
     ${v.note ? `<div class="note-display">${escapeHtml(v.note)}</div>` : `<div class="empty" style="padding:20px 0;"><div class="empty-sub">No notes yet. Tap edit to add one.</div></div>`}
@@ -1704,10 +1913,18 @@ function renderRemindersTab(v) {
     const bDue = reminderDueIn(v, b);
     return (aDue.sortKey) - (bDue.sortKey);
   });
+  const manual = vehicleManual(v);
+  const missingTimed = manual ? manual.timed.filter(t => !(v.reminders || []).some(r => r.title === t.title)) : [];
   return `
     <button class="btn-pill" onclick="action.openSheet('newReminder')" style="margin-bottom:16px;">
       <span style="font-size:18px;line-height:0">+</span> New reminder
     </button>
+    ${missingTimed.length ? `
+      <button class="btn-pill" onclick="action.addManualReminders()" style="margin:-6px 0 16px;background:transparent;color:var(--text-2);border:1px solid var(--line);">
+        Add the manual's time-based reminders
+      </button>
+      <div class="help-text" style="margin:-10px 0 16px;">The Maintenance Minder tracks mileage, not calendar time. The manual also says: ${manual.timed.map(t => t.title.replace(' — ', ' every ').replace('-month max', ' months').replace('-year max', ' years')).join('; ')}.</div>
+    ` : ''}
     ${reminders.length ? reminders.map(r => reminderItemHTML(v, r)).join('') :
       `<div class="empty"><div class="empty-icon">🔔</div><div class="empty-title">No reminders yet</div><div class="empty-sub">Set a reminder by date or mileage.</div></div>`
     }
@@ -1878,7 +2095,7 @@ function renderSheet() {
   switch (type) {
     case 'newVehicle': body = sheetVehicleForm(null); break;
     case 'editVehicle': body = sheetVehicleForm(getActiveVehicle()); break;
-    case 'newService': body = sheetServiceForm(null); break;
+    case 'newService': body = sheetServiceForm(null, payload.title); break;
     case 'editService': {
       const v = getActiveVehicle();
       const s = (v.services || []).find(x => x.id === payload.id);
@@ -1947,17 +2164,26 @@ function sheetVehicleForm(existing) {
 
     <div class="field">
       <label class="label">Make</label>
-      <input class="input" id="f-make" placeholder="Honda" value="${escapeHtml(v.make || '')}" autocapitalize="words">
+      <input class="input" id="f-make" placeholder="Honda" value="${escapeHtml(v.make || '')}" autocapitalize="words" oninput="action.suggestManual()">
     </div>
 
     <div class="field">
       <label class="label">Model</label>
-      <input class="input" id="f-model" placeholder="Accord" value="${escapeHtml(v.model || '')}" autocapitalize="words">
+      <input class="input" id="f-model" placeholder="Accord" value="${escapeHtml(v.model || '')}" autocapitalize="words" oninput="action.suggestManual()">
     </div>
 
     <div class="field">
       <label class="label">Trim</label>
       <input class="input" id="f-trim" placeholder="Sport (Optional)" value="${escapeHtml(v.trim || '')}" autocapitalize="words">
+    </div>
+
+    <div class="field">
+      <label class="label">Owner's manual data</label>
+      <select class="select" id="f-manual">
+        <option value="">None</option>
+        ${Object.entries(MANUALS).map(([k, m]) => `<option value="${k}" ${v.manual === k ? 'selected' : ''}>${m.name}</option>`).join('')}
+      </select>
+      <div class="help-text">Adds specs, a Maintenance Minder decoder, and the manual's service intervals.</div>
     </div>
 
     <div class="field">
@@ -2030,8 +2256,8 @@ function updateHeroUploader(heroPhoto, heroFloating) {
   if (el) el.innerHTML = heroUploaderHTML(heroPhoto, heroFloating);
 }
 
-function sheetServiceForm(existing) {
-  const s = existing || { date: Date.now() };
+function sheetServiceForm(existing, prefillTitle) {
+  const s = existing || { date: Date.now(), title: prefillTitle || '' };
   const isEdit = !!existing;
   const dateStr = toDateInput(s.date);
   return `
@@ -2188,7 +2414,7 @@ const action = {
   setDetailTab(t) { STATE.detailTab = t; render(); },
   openVehicle(id) { STATE.activeVehicleId = id; STATE.detailTab = 'overview'; persist(); render(); },
   openVehicleAtTab(id, t) { STATE.activeVehicleId = id; STATE.detailTab = t; persist(); render(); },
-  closeVehicle() { STATE.activeVehicleId = null; persist(); render(); },
+  closeVehicle() { STATE.activeVehicleId = null; STATE._minderCode = ''; persist(); render(); },
 
   onCarouselScroll() {
     if (action._scrollRAF) return;
@@ -2232,6 +2458,44 @@ const action = {
   },
 
   setUnit(u) { STATE.defaultUnit = u; persist(); render(); toast(`Default: ${u === 'mi' ? 'Miles' : 'Kilometers'}`); },
+
+  // Auto-pick the manual when make/model match, unless the user already chose one
+  suggestManual() {
+    const sel = $('#f-manual');
+    if (!sel || sel.value) return;
+    sel.value = suggestManual({ make: $('#f-make').value, model: $('#f-model').value });
+  },
+
+  // Patches only the decoder output so the input keeps focus while typing
+  setMinderCode(code) {
+    STATE._minderCode = code;
+    const v = getActiveVehicle(), manual = v && vehicleManual(v);
+    const out = document.getElementById('minder-out');
+    if (out && manual) out.innerHTML = minderOutputHTML(code, manual);
+  },
+
+  logMinderService() {
+    const v = getActiveVehicle(), manual = v && vehicleManual(v);
+    if (!manual) return;
+    action.openSheet('newService', { title: minderServiceTitle(STATE._minderCode, manual) });
+  },
+
+  addManualReminders() {
+    const v = getActiveVehicle();
+    const manual = vehicleManual(v);
+    if (!manual) return;
+    v.reminders = v.reminders || [];
+    let added = 0;
+    manual.timed.forEach(t => {
+      if (v.reminders.some(r => r.title === t.title)) return;
+      const due = new Date(); due.setMonth(due.getMonth() + t.months);
+      v.reminders.push({ id: uid(), title: t.title, dueDate: due.getTime(), dueMileage: null, done: false });
+      added++;
+    });
+    persist();
+    render();
+    toast(`${added} reminder${added === 1 ? '' : 's'} added`);
+  },
 
   async stageHeroPhoto(file) {
     if (!file) return;
@@ -2300,6 +2564,7 @@ const action = {
       year: $('#f-year').value ? Number($('#f-year').value) : null,
       vin: $('#f-vin').value.trim(),
       note: $('#f-note').value,
+      manual: $('#f-manual').value || null,
     };
 
     // Hero photo handling
