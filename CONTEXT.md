@@ -35,9 +35,24 @@ STATE → STORAGE → UTILS → ICONS → OWNER'S MANUAL DATA → SCREENS → SH
 - Vehicle shape: `{id, year, make, model, trim, plate, mileage, unit, vin, note,
   heroPhoto, heroFloating, photos[], services[], reminders[]}`
 - `vehicle.manual` is an optional key into `MANUALS` (see below).
-- Service: `{id, title, date, mileage, cost, note}`. Reminder:
-  `{id, title, dueDate, dueMileage, done, completedAt}`. Dates are ms timestamps
-  at **local** midnight — always go through `fromDateInput` / `toDateInput`.
+- Service: `{id, items[], title, date, mileage, cost, note}` — `items` is the
+  list of what was done; `title` is a derived join kept for older entries and
+  the global Services list. Reminder ("Needed" item): `{id, title, dueDate,
+  dueMileage, done, completedAt, serviceId}`. Dates are ms timestamps at
+  **local** midnight — always go through `fromDateInput` / `toDateInput`.
+
+### The Needed → Service flow
+
+The "Reminders" tab is labelled **Needed**: it's the car's to-do list. Items
+get there from the Minder decoder ("Add to Needed"), the manual's calendar
+rules, or by hand. **Log Service** is a checklist of those open items — tick
+what was done, the rest stay on "Later" — plus quick-pick chips
+(`SERVICE_CATALOG`) and a free-text add. Saving marks the ticked items
+`done` (hidden from Needed, kept in data with `serviceId`), and any completed
+manual calendar rule is re-created dated from the service. Tapping the circle
+on a Needed row opens the same sheet with that item pre-ticked; there is no
+"mark done" that bypasses the log. Checklist state lives in `STATE._svc` and
+toggles patch the DOM — same no-re-render rule as every other sheet.
 
 ### Render rules that keep the UI from flickering
 
@@ -136,7 +151,8 @@ The no-photo placeholder is a base64 PNG car silhouette embedded in
 - Photos are still base64 strings inside the one state blob, so every
   `persist()` rewrites all of them. Fine at tens of photos; if it ever feels
   slow, split photos into their own IDB records.
-- Reminders marked done stay in the list (struck through) forever. No archive.
+- Done Needed items are hidden, not shown anywhere except via the service
+  they were logged with. No "completed" view yet.
 - In-app cutout is verified on desktop Chrome only. Needs a real run on iOS
   Safari (memory pressure on the ~40 MB model is the risk).
 

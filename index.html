@@ -769,6 +769,60 @@ h2.section-title {
 }
 .reminder-item .check-btn:active { background: var(--accent); color: #001a11; border-color: var(--accent); }
 
+/* Service checklist (in the Log Service sheet) */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.check-row .box {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-2);
+  display: grid; place-items: center;
+  color: transparent;
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+.check-row .box svg { width: 14px; height: 14px; }
+.check-row .ct { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; }
+.check-row .cm { font-size: 12px; color: var(--text-3); margin-top: 1px; }
+.check-row .tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.check-row.on { border-color: var(--accent-dim); }
+.check-row.on .box { background: var(--accent); border-color: var(--accent); color: #001a11; }
+.check-row.on .tag { color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  background: transparent;
+  border: 1px solid var(--line-2);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.12s;
+}
+.chip.on { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+.chip.custom { border-style: dashed; }
+.add-item-row { display: flex; gap: 8px; margin-top: 10px; }
+.add-item-row .input { flex: 1; }
+.add-item-row .btn-ghost { padding: 12px 16px; flex-shrink: 0; }
+.service-item .sitems { font-size: 13px; color: var(--text-2); margin-top: 3px; line-height: 1.5; }
+
 /* ============================================================
    EMPTY STATES
 ============================================================ */
@@ -1293,6 +1347,7 @@ const STATE = {
   _tentativeHeroOriginal: null,     // pre-cutout photo, so "use original" can revert
   _heroBusy: null,                  // progress text while the cutout runs
   _minderCode: '',                  // what's typed in the Maintenance Minder box
+  _svc: null,                       // service checklist: { checked:Set, chips:Set, extra:[] }
 };
 
 /* =========================================================
@@ -1678,6 +1733,13 @@ const MANUALS = {
   },
 };
 
+// Quick-pick jobs for the service checklist
+const SERVICE_CATALOG = [
+  'Engine oil', 'Oil filter', 'Rotate tires', 'Engine air filter', 'Cabin air filter',
+  'Brake pads', 'Brake fluid', 'Wiper blades', '12V battery', 'Coolant', 'Spark plugs',
+  'Transmission fluid', 'Tires', 'Alignment', 'Inspection',
+];
+
 function vehicleManual(v) {
   return v.manual ? MANUALS[v.manual] : null;
 }
@@ -1705,17 +1767,28 @@ function minderOutputHTML(code, manual) {
   ).join('');
   const valid = items.filter(i => !i.unknown);
   return html + (valid.length ? `
-    <button class="btn-pill" style="margin-top:12px;width:100%;justify-content:center;" onclick="action.logMinderService()">
-      Log this service
+    <button class="btn-pill" style="margin-top:12px;width:100%;justify-content:center;" onclick="action.addMinderToNeeded()">
+      Add to Needed
     </button>` : '');
 }
 
-// "B12" -> "Maintenance Minder B12 — engine oil and oil filter, rotate tires, …"
-function minderServiceTitle(code, manual) {
-  const valid = decodeMinder(code, manual).filter(i => !i.unknown);
-  if (!valid.length) return '';
-  const what = valid.map(i => i.title.replace(/^Replace /, '').replace(/^Rotate /, 'rotate '));
-  return `Maintenance Minder ${valid.map(i => i.code).join('')} — ${what.join(', ')}`;
+// Items a Minder code puts on the Needed list, e.g. B12 -> ['Engine oil & filter (B)', 'Rotate tires (1)', ...]
+function minderNeededItems(code, manual) {
+  return decodeMinder(code, manual).filter(i => !i.unknown).map(i => ({
+    title: `${i.title.replace('engine oil and oil filter', 'engine oil & filter').replace('engine air cleaner element and cabin (dust & pollen) filter', 'engine air & cabin filters')} (${i.code})`,
+    sub: i.sub || null,
+  }));
+}
+
+// Display line for a service entry: its items, or the legacy free-text title
+function serviceItems(s) {
+  return s.items && s.items.length ? s.items : (s.title ? [s.title] : []);
+}
+function serviceSummary(s) {
+  const items = serviceItems(s);
+  if (!items.length) return 'Service';
+  if (items.length <= 2) return items.join(' · ');
+  return `${items[0]} · ${items[1]} · +${items.length - 2} more`;
 }
 
 // Build a friendly display name from year/make/model/trim
@@ -1824,7 +1897,7 @@ function renderVehicleDetail() {
       <div class="tabs">
         <button class="tab ${tab==='overview'?'active':''}" onclick="action.setDetailTab('overview')">Overview</button>
         <button class="tab ${tab==='services'?'active':''}" onclick="action.setDetailTab('services')">Service</button>
-        <button class="tab ${tab==='reminders'?'active':''}" onclick="action.setDetailTab('reminders')">Reminders</button>
+        <button class="tab ${tab==='reminders'?'active':''}" onclick="action.setDetailTab('reminders')">Needed</button>
         <button class="tab ${tab==='media'?'active':''}" onclick="action.setDetailTab('media')">Media</button>
       </div>
 
@@ -1884,9 +1957,9 @@ function renderOverviewTab(v) {
     <h2 class="section-title">Notes</h2>
     ${v.note ? `<div class="note-display">${escapeHtml(v.note)}</div>` : `<div class="empty" style="padding:20px 0;"><div class="empty-sub">No notes yet. Tap edit to add one.</div></div>`}
 
-    <h2 class="section-title">Upcoming reminders</h2>
+    <h2 class="section-title">Needed</h2>
     ${upcomingReminders.length ? upcomingReminders.map(r => reminderItemHTML(v, r)).join('') :
-      `<div class="empty" style="padding:20px 0;"><div class="empty-sub">No reminders set.</div></div>`}
+      `<div class="empty" style="padding:20px 0;"><div class="empty-sub">Nothing needed right now.</div></div>`}
 
     ${recentService ? `
       <h2 class="section-title">Latest service</h2>
@@ -1907,27 +1980,32 @@ function renderServicesTab(v) {
   `;
 }
 
+function openNeeded(v) {
+  return (v.reminders || []).filter(r => !r.done)
+    .sort((a, b) => reminderDueIn(v, a).sortKey - reminderDueIn(v, b).sortKey);
+}
+
 function renderRemindersTab(v) {
-  const reminders = (v.reminders || []).slice().sort((a,b) => {
-    const aDue = reminderDueIn(v, a);
-    const bDue = reminderDueIn(v, b);
-    return (aDue.sortKey) - (bDue.sortKey);
-  });
+  const needed = openNeeded(v);
   const manual = vehicleManual(v);
-  const missingTimed = manual ? manual.timed.filter(t => !(v.reminders || []).some(r => r.title === t.title)) : [];
+  const missingTimed = manual ? manual.timed.filter(t => !(v.reminders || []).some(r => !r.done && r.title === t.title)) : [];
   return `
-    <button class="btn-pill" onclick="action.openSheet('newReminder')" style="margin-bottom:16px;">
-      <span style="font-size:18px;line-height:0">+</span> New reminder
-    </button>
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <button class="btn-pill" onclick="action.openSheet('newReminder')" style="flex:1;justify-content:center;">
+        <span style="font-size:18px;line-height:0">+</span> Add item
+      </button>
+      ${needed.length ? `<button class="btn-pill" onclick="action.openSheet('newService')" style="flex:1;justify-content:center;background:transparent;color:var(--text);border:1px solid var(--line-2);">Log service</button>` : ''}
+    </div>
     ${missingTimed.length ? `
-      <button class="btn-pill" onclick="action.addManualReminders()" style="margin:-6px 0 16px;background:transparent;color:var(--text-2);border:1px solid var(--line);">
-        Add the manual's time-based reminders
+      <button class="btn-pill" onclick="action.addManualReminders()" style="margin:-6px 0 16px;width:100%;justify-content:center;background:transparent;color:var(--text-2);border:1px solid var(--line);">
+        Add the manual's time-based items
       </button>
       <div class="help-text" style="margin:-10px 0 16px;">The Maintenance Minder tracks mileage, not calendar time. The manual also says: ${manual.timed.map(t => t.title.replace(' — ', ' every ').replace('-month max', ' months').replace('-year max', ' years')).join('; ')}.</div>
     ` : ''}
-    ${reminders.length ? reminders.map(r => reminderItemHTML(v, r)).join('') :
-      `<div class="empty"><div class="empty-icon">🔔</div><div class="empty-title">No reminders yet</div><div class="empty-sub">Set a reminder by date or mileage.</div></div>`
+    ${needed.length ? needed.map(r => reminderItemHTML(v, r)).join('') :
+      `<div class="empty"><div class="empty-icon">🔔</div><div class="empty-title">Nothing needed</div><div class="empty-sub">Type a Maintenance Minder code on Overview, or add an item by date or mileage.</div></div>`
     }
+    <div class="help-text" style="text-align:center;margin-top:8px;">Tap the circle on an item when it's done — it goes into the service log.</div>
   `;
 }
 
@@ -1956,7 +2034,7 @@ function serviceItemHTML(v, s) {
     <div class="service-item" onclick="action.openSheet('editService', { id: '${s.id}' })">
       <div class="service-icon">${ICON.wrench}</div>
       <div style="flex:1;min-width:0;">
-        <div class="stitle">${escapeHtml(s.title || 'Service')}</div>
+        <div class="stitle">${escapeHtml(serviceSummary(s))}</div>
         <div class="smeta">
           ${fmtDate(s.date)}${s.mileage ? ' · ' + fmtNum(s.mileage) + ' ' + (v.unit || STATE.defaultUnit) : ''}
         </div>
@@ -1975,7 +2053,7 @@ function reminderItemHTML(v, r) {
         <div class="rtitle" style="${r.done ? 'text-decoration:line-through;color:var(--text-3)' : ''}">${escapeHtml(r.title)}</div>
         <div class="rmeta">${due.text}</div>
       </div>
-      <button class="check-btn" onclick="action.toggleReminder('${r.id}')" aria-label="Done">
+      <button class="check-btn" onclick="action.openSheet('newService', { check: '${r.id}' })" aria-label="Done">
         ${r.done ? ICON.check : ''}
       </button>
     </div>
@@ -2033,7 +2111,7 @@ function renderServicesGlobal() {
         <div class="service-item" onclick="action.openVehicleAtTab('${s._v.id}','services')">
           <div class="service-icon">${ICON.wrench}</div>
           <div style="flex:1;min-width:0;">
-            <div class="stitle">${escapeHtml(s.title || 'Service')}</div>
+            <div class="stitle">${escapeHtml(serviceSummary(s))}</div>
             <div class="smeta">${escapeHtml(vehicleDisplayName(s._v))} · ${fmtDate(s.date)}</div>
           </div>
           ${s.cost ? `<div class="scost">${fmtMoney(s.cost)}</div>` : ''}
@@ -2095,7 +2173,7 @@ function renderSheet() {
   switch (type) {
     case 'newVehicle': body = sheetVehicleForm(null); break;
     case 'editVehicle': body = sheetVehicleForm(getActiveVehicle()); break;
-    case 'newService': body = sheetServiceForm(null, payload.title); break;
+    case 'newService': body = sheetServiceForm(null, payload.check); break;
     case 'editService': {
       const v = getActiveVehicle();
       const s = (v.services || []).find(x => x.id === payload.id);
@@ -2256,29 +2334,60 @@ function updateHeroUploader(heroPhoto, heroFloating) {
   if (el) el.innerHTML = heroUploaderHTML(heroPhoto, heroFloating);
 }
 
-function sheetServiceForm(existing, prefillTitle) {
-  const s = existing || { date: Date.now(), title: prefillTitle || '' };
+function sheetServiceForm(existing, checkId) {
+  const v = getActiveVehicle();
+  const s = existing || { date: Date.now() };
   const isEdit = !!existing;
-  const dateStr = toDateInput(s.date);
+  const svc = STATE._svc;
+
+  // New: the car's Needed list as a checklist. Edit: the entry's own items.
+  const rows = isEdit
+    ? serviceItems(s).map((t, i) => ({ key: `i${i}`, title: t, sub: null }))
+    : openNeeded(v).map(r => ({ key: r.id, title: r.title, sub: reminderDueIn(v, r).text }));
+  const rowTitles = new Set(rows.map(r => r.title));
+  const chips = SERVICE_CATALOG.filter(c => !rowTitles.has(c));
+
   return `
     <div class="sheet-header">
       <div class="sheet-title">${isEdit ? 'Edit Service' : 'Log Service'}</div>
       <button class="close-btn" onclick="action.closeSheet()">×</button>
     </div>
 
+    ${rows.length ? `
     <div class="field">
-      <label class="label">What was done</label>
-      <input class="input" id="f-stitle" placeholder="Oil change, tire rotation, brake pads…" value="${escapeHtml(s.title || '')}">
+      <label class="label">${isEdit ? 'Items' : 'Needed — tap what was done'}</label>
+      ${rows.map(r => `
+        <div class="check-row ${svc.checked.has(r.key) ? 'on' : ''}" data-key="${r.key}" onclick="action.toggleSvcRow('${r.key}')">
+          <div class="box">${ICON.check}</div>
+          <div style="flex:1;min-width:0;">
+            <div class="ct">${escapeHtml(r.title)}</div>
+            ${r.sub ? `<div class="cm">${r.sub}</div>` : ''}
+          </div>
+          <div class="tag">${svc.checked.has(r.key) ? 'Done' : (isEdit ? 'Remove' : 'Later')}</div>
+        </div>`).join('')}
+      ${isEdit ? '' : `<div class="help-text">Anything left on "Later" stays on the Needed list.</div>`}
+    </div>` : ''}
+
+    <div class="field">
+      <label class="label">${rows.length ? 'Also done' : 'What was done'}</label>
+      <div class="chips" id="svc-chips">
+        ${chips.map(c => `<button type="button" class="chip ${svc.chips.has(c) ? 'on' : ''}" data-chip="${escapeHtml(c)}" onclick="action.toggleSvcChip(this.dataset.chip)">${escapeHtml(c)}</button>`).join('')}
+        ${svc.extra.map((t, i) => `<button type="button" class="chip on custom" onclick="action.removeSvcExtra(${i})">${escapeHtml(t)} ×</button>`).join('')}
+      </div>
+      <div class="add-item-row">
+        <input class="input" id="f-sextra" placeholder="Something else…" onkeydown="if(event.key==='Enter'){event.preventDefault();action.addSvcExtra();}">
+        <button type="button" class="btn-ghost" onclick="action.addSvcExtra()">Add</button>
+      </div>
     </div>
 
     <div class="field">
       <label class="label">Date</label>
-      <input class="input" id="f-sdate" type="date" value="${dateStr}">
+      <input class="input" id="f-sdate" type="date" value="${toDateInput(s.date)}">
     </div>
 
     <div class="field">
       <label class="label">Mileage at service</label>
-      <input class="input" id="f-smileage" type="number" inputmode="numeric" placeholder="85000" value="${s.mileage ?? ''}">
+      <input class="input" id="f-smileage" type="number" inputmode="numeric" placeholder="${v.mileage ? fmtNum(v.mileage).replace(/,/g, '') : '85000'}" value="${s.mileage ?? ''}">
     </div>
 
     <div class="field">
@@ -2303,18 +2412,33 @@ function sheetServiceForm(existing, prefillTitle) {
   `;
 }
 
+// Re-draw only the chips block (the row toggles patch themselves)
+function updateSvcChips() {
+  const el = document.getElementById('svc-chips');
+  if (!el) return;
+  const svc = STATE._svc;
+  el.querySelectorAll('.chip[data-chip]').forEach(c => c.classList.toggle('on', svc.chips.has(c.dataset.chip)));
+  el.querySelectorAll('.chip.custom').forEach(c => c.remove());
+  svc.extra.forEach((t, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip on custom'; b.textContent = `${t} ×`;
+    b.onclick = () => action.removeSvcExtra(i);
+    el.appendChild(b);
+  });
+}
+
 function sheetReminderForm(existing) {
   const r = existing || {};
   const isEdit = !!existing;
   const dateStr = toDateInput(r.dueDate);
   return `
     <div class="sheet-header">
-      <div class="sheet-title">${isEdit ? 'Edit Reminder' : 'New Reminder'}</div>
+      <div class="sheet-title">${isEdit ? 'Edit Item' : 'Needed Item'}</div>
       <button class="close-btn" onclick="action.closeSheet()">×</button>
     </div>
 
     <div class="field">
-      <label class="label">What to remember</label>
+      <label class="label">What's needed</label>
       <input class="input" id="f-rtitle" placeholder="Oil change, registration renewal…" value="${escapeHtml(r.title || '')}">
     </div>
 
@@ -2326,16 +2450,16 @@ function sheetReminderForm(existing) {
     <div class="field">
       <label class="label">Due at mileage</label>
       <input class="input" id="f-rmileage" type="number" inputmode="numeric" placeholder="90000" value="${r.dueMileage ?? ''}">
-      <div class="help-text">Set either or both. Reminder will alert when whichever comes first.</div>
+      <div class="help-text">Optional. Set either or both — it alerts on whichever comes first.</div>
     </div>
 
     <button class="btn-primary" onclick="action.saveReminder(${isEdit ? `'${r.id}'` : 'null'})">
-      ${isEdit ? 'Save Changes' : 'Create Reminder'}
+      ${isEdit ? 'Save Changes' : 'Add to Needed'}
     </button>
 
     ${isEdit ? `
       <button class="btn-danger-text" style="margin-top:12px;" onclick="action.deleteReminder('${r.id}')">
-        Delete Reminder
+        Remove Item
       </button>
     ` : ''}
   `;
@@ -2440,6 +2564,15 @@ const action = {
     }
     STATE._tentativeHeroOriginal = null;
     STATE._heroBusy = null;
+    if (type === 'newService' || type === 'editService') {
+      STATE._svc = { checked: new Set(), chips: new Set(), extra: [] };
+      if (type === 'newService' && payload.check) STATE._svc.checked.add(payload.check);
+      if (type === 'editService') {
+        const v = getActiveVehicle();
+        const svc = (v.services || []).find(x => x.id === payload.id);
+        serviceItems(svc).forEach((_, i) => STATE._svc.checked.add(`i${i}`));
+      }
+    }
     render();
   },
   closeSheet() {
@@ -2474,10 +2607,49 @@ const action = {
     if (out && manual) out.innerHTML = minderOutputHTML(code, manual);
   },
 
-  logMinderService() {
+  addMinderToNeeded() {
     const v = getActiveVehicle(), manual = v && vehicleManual(v);
     if (!manual) return;
-    action.openSheet('newService', { title: minderServiceTitle(STATE._minderCode, manual) });
+    v.reminders = v.reminders || [];
+    let added = 0;
+    minderNeededItems(STATE._minderCode, manual).forEach(item => {
+      if (v.reminders.some(r => !r.done && r.title === item.title)) return;
+      v.reminders.push({ id: uid(), title: item.title, dueDate: fromDateInput(toDateInput(Date.now())), dueMileage: null, done: false });
+      added++;
+    });
+    persist();
+    STATE._minderCode = '';
+    STATE.detailTab = 'reminders';
+    render();
+    toast(added ? `${added} item${added === 1 ? '' : 's'} added to Needed` : 'Already on the list');
+  },
+
+  // --- service checklist (patches DOM; never re-renders the open sheet) ---
+  toggleSvcRow(key) {
+    const svc = STATE._svc;
+    svc.checked.has(key) ? svc.checked.delete(key) : svc.checked.add(key);
+    const row = document.querySelector(`.check-row[data-key="${key}"]`);
+    if (!row) return;
+    const on = svc.checked.has(key);
+    row.classList.toggle('on', on);
+    row.querySelector('.tag').textContent = on ? 'Done' : (STATE.sheet.type === 'editService' ? 'Remove' : 'Later');
+  },
+  toggleSvcChip(label) {
+    const svc = STATE._svc;
+    svc.chips.has(label) ? svc.chips.delete(label) : svc.chips.add(label);
+    updateSvcChips();
+  },
+  addSvcExtra() {
+    const input = $('#f-sextra');
+    const t = input.value.trim();
+    if (!t) return;
+    STATE._svc.extra.push(t);
+    input.value = '';
+    updateSvcChips();
+  },
+  removeSvcExtra(i) {
+    STATE._svc.extra.splice(i, 1);
+    updateSvcChips();
   },
 
   addManualReminders() {
@@ -2487,7 +2659,7 @@ const action = {
     v.reminders = v.reminders || [];
     let added = 0;
     manual.timed.forEach(t => {
-      if (v.reminders.some(r => r.title === t.title)) return;
+      if (v.reminders.some(r => !r.done && r.title === t.title)) return;
       const due = new Date(); due.setMonth(due.getMonth() + t.months);
       v.reminders.push({ id: uid(), title: t.title, dueDate: due.getTime(), dueMileage: null, done: false });
       added++;
@@ -2610,31 +2782,50 @@ const action = {
 
   saveService(id) {
     const v = getActiveVehicle();
-    const title = $('#f-stitle').value.trim();
-    if (!title) { alert('Description is required.'); return; }
-    const dateVal = $('#f-sdate').value;
+    const svc = STATE._svc;
+    v.services = v.services || [];
+    v.reminders = v.reminders || [];
+    const existing = id ? v.services.find(x => x.id === id) : null;
+
+    // Items = ticked rows + chips + free-text, de-duplicated
+    const doneNeeded = id ? [] : v.reminders.filter(r => svc.checked.has(r.id));
+    const keptItems = id ? serviceItems(existing).filter((_, i) => svc.checked.has(`i${i}`)) : doneNeeded.map(r => r.title);
+    const items = [...new Set([...keptItems, ...svc.chips, ...svc.extra])];
+    if (!items.length) { alert('Tick or add at least one item.'); return; }
+
+    const date = fromDateInput($('#f-sdate').value) ?? Date.now();
     const data = {
-      title,
-      date: fromDateInput(dateVal) ?? Date.now(),
+      items,
+      title: items.join(' · '),
+      date,
       mileage: $('#f-smileage').value ? Number($('#f-smileage').value) : null,
       cost: $('#f-scost').value ? Number($('#f-scost').value) : null,
       note: $('#f-snote').value,
     };
-    v.services = v.services || [];
-    if (id) {
-      const s = v.services.find(x => x.id === id);
-      Object.assign(s, data);
+
+    if (existing) {
+      Object.assign(existing, data);
     } else {
-      v.services.push({ id: uid(), ...data });
-      // Auto-update vehicle mileage if higher
-      if (data.mileage && (!v.mileage || data.mileage > v.mileage)) {
-        v.mileage = data.mileage;
-      }
+      const entry = { id: uid(), ...data };
+      v.services.push(entry);
+      if (data.mileage && (!v.mileage || data.mileage > v.mileage)) v.mileage = data.mileage;
+
+      // Ticked Needed items are complete; anything on "Later" is untouched
+      doneNeeded.forEach(r => { r.done = true; r.completedAt = date; r.serviceId = entry.id; });
+
+      // The manual's calendar rules roll forward from this service
+      const manual = vehicleManual(v);
+      if (manual) manual.timed.forEach(t => {
+        if (!doneNeeded.some(r => r.title === t.title)) return;
+        const due = new Date(date); due.setMonth(due.getMonth() + t.months);
+        v.reminders.push({ id: uid(), title: t.title, dueDate: due.getTime(), dueMileage: null, done: false });
+      });
     }
     persist();
     STATE.sheet = null;
+    STATE._svc = null;
     render();
-    toast(id ? 'Service updated' : 'Service logged');
+    toast(id ? 'Service updated' : `Logged ${items.length} item${items.length === 1 ? '' : 's'}`);
   },
 
   deleteService(id) {
@@ -2668,17 +2859,6 @@ const action = {
     STATE.sheet = null;
     render();
     toast(id ? 'Reminder updated' : 'Reminder set');
-  },
-
-  toggleReminder(id) {
-    const v = getActiveVehicle();
-    const r = (v.reminders || []).find(x => x.id === id);
-    if (r) {
-      r.done = !r.done;
-      r.completedAt = r.done ? Date.now() : null;
-      persist();
-      render();
-    }
   },
 
   deleteReminder(id) {
