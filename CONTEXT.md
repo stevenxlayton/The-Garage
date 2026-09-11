@@ -9,8 +9,9 @@ custom fields).
 - **One HTML file.** No build step, no bundler, no npm. `index.html` is the app.
 - **No external runtime deps.** Google Fonts (Sora + JetBrains Mono) is the only
   network request. Everything else is inline or base64.
-- **localStorage only.** No backend, no accounts, no sync. JSON export/import in
-  Settings is the backup mechanism.
+- **On-device storage only.** No backend, no accounts, no sync. IndexedDB is the
+  primary store (localStorage is a best-effort mirror and the migration source
+  for pre-IDB data). JSON export/import in Settings is the backup mechanism.
 - Target device is iPhone, installed via Add to Home Screen. Safe-area insets and
   standalone mode are already wired.
 
@@ -19,14 +20,32 @@ custom fields).
 Vanilla JS, no framework. File is organized in commented sections:
 
 ```
-STATE → STORAGE → UTILS → ICONS → SCREENS → ROUTER → ACTIONS → INIT
+STATE → STORAGE → UTILS → ICONS → SCREENS → SHEETS → ROUTER → ACTIONS → INIT
 ```
 
 - `STATE` is a single mutable object. `render()` rebuilds `#app` innerHTML from it.
+  Fields prefixed `_` are transient UI state and never persisted.
 - Every `onclick` routes through the `action` object. Nothing calls internals directly.
-- `persist()` writes to localStorage on every mutation.
+- `persist()` writes on every mutation (fire-and-forget; a failure alerts once
+  instead of being swallowed).
+- `loadState()` is async — `INIT` is `loadState().then(render)`.
 - Vehicle shape: `{id, year, make, model, trim, plate, mileage, unit, vin, note,
   heroPhoto, heroFloating, photos[], services[], reminders[]}`
+- Service: `{id, title, date, mileage, cost, note}`. Reminder:
+  `{id, title, dueDate, dueMileage, done, completedAt}`. Dates are ms timestamps
+  at **local** midnight — always go through `fromDateInput` / `toDateInput`.
+
+### Render rules that keep the UI from flickering
+
+- `render()` compares a screen key (`v:<id>` or `t:<tab>`) to the previous one.
+  Same screen → `#app.no-anim` (no entrance animation) and scroll position is kept.
+- **Never call `render()` while a sheet is open** unless you're closing it.
+  Rebuilding the sheet throws away everything the user has typed. In-sheet
+  actions (`toggleVehicleUnit`, `stageHeroPhoto`, `clearHeroPhoto`) patch the
+  DOM directly instead.
+- `toast()` writes to `#toast`, outside `#app`, so it never triggers a render.
+- The carousel index is read off the live DOM at the top of `render()` so
+  Home → Services → Home lands on the same car.
 
 ## Design language
 
@@ -77,12 +96,19 @@ The no-photo placeholder is a base64 PNG car silhouette embedded in
 
 ## Known issues / open items
 
-- Detail page shows `—` for every empty field (VIN, total spent, last service).
-  Should hide empty spec cards instead of rendering dashes.
-- Photos live in localStorage as base64. Fine for normal use, will hit the ~5MB
-  quota if photos pile up. IndexedDB is the eventual fix.
 - No service worker, so no true offline caching. Works offline once loaded.
 - iOS PWAs can't do push notifications, so reminders are visual only.
+- Photos are still base64 strings inside the one state blob, so every
+  `persist()` rewrites all of them. Fine at tens of photos; if it ever feels
+  slow, split photos into their own IDB records.
+- Reminders marked done stay in the list (struck through) forever. No archive.
+
+## iOS specifics
+
+- `apple-touch-icon` is an inline base64 PNG (iOS ignores the manifest's icons
+  and needs PNG, not SVG). Regenerate via a canvas if the look changes.
+- Export uses `navigator.share({ files })` when available — a plain
+  `<a download>` doesn't reliably work in standalone mode.
 
 ## Deployment
 
