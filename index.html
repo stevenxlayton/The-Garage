@@ -756,6 +756,47 @@ h2.section-title {
 }
 .reminder-item.overdue { border-left-color: var(--danger); }
 .reminder-item.soon { border-left-color: var(--warn); }
+.reminder-item.deferred { border-left-color: var(--text-3); }
+.reminder-item.priority .rtitle::before { content: '!'; color: var(--danger); font-family: 'JetBrains Mono', monospace; margin-right: 6px; }
+/* roster rows: the "everything else" list */
+.roster-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.roster-row:last-child { border-bottom: none; }
+.roster-row .rt { flex: 1; min-width: 0; font-size: 15px; font-weight: 500; }
+.roster-row .rl { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-3); letter-spacing: 0.04em; text-align: right; flex-shrink: 0; }
+.roster-row.ignored .rt { color: var(--text-3); text-decoration: line-through; }
+.rtitle .code, .roster-row .code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-glow);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: 8px;
+}
+.roster { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin-bottom: 10px; }
+.section-title .count { color: var(--text-3); font-weight: 500; font-size: 14px; margin-left: 6px; }
+.seg.wide { display: flex; width: 100%; }
+.seg.wide button { flex: 1; text-align: center; padding: 9px 6px; }
+.seg button.active.danger { background: rgba(255,77,77,0.18); color: var(--danger); }
+.seg button.active.muted { background: var(--line-2); color: var(--text); }
+.quick-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.last-done { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-3); letter-spacing: 0.04em; text-transform: uppercase; margin: -6px 0 16px; }
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 12px 14px; font-size: 15px; font-weight: 600; cursor: pointer; user-select: none;
+}
+.toggle-row .sw { width: 42px; height: 26px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--line-2); position: relative; transition: all 0.15s; }
+.toggle-row .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--text-3); transition: all 0.15s; }
+.toggle-row.on .sw { background: var(--accent); border-color: var(--accent); }
+.toggle-row.on .sw::after { left: 21px; background: #001a11; }
 .reminder-item .rtitle { font-weight: 600; font-size: 15px; }
 .reminder-item .rmeta { font-size: 12px; color: var(--text-2); margin-top: 2px; }
 .reminder-item .check-btn {
@@ -1333,10 +1374,10 @@ hr.divider {
    STATE
 ========================================================= */
 const STATE = {
-  vehicles: [],            // {id, year, make, model, trim, plate, mileage, unit, vin, note, heroPhoto, heroFloating, photos:[dataURL], services:[], reminders:[]}
+  vehicles: [],            // {id, year, make, model, trim, plate, mileage, unit, vin, note, manual, heroPhoto, heroFloating, photos:[dataURL], services:[], items:[]}
   activeVehicleId: null,
   tab: 'home',             // home | services | settings
-  detailTab: 'overview',   // overview | services | reminders | media
+  detailTab: 'overview',   // overview | services | media
   sheet: null,             // {type, payload}
   defaultUnit: 'mi',
   // transient, never persisted
@@ -1405,6 +1446,7 @@ function applySnapshot(data) {
   STATE.vehicles = data.vehicles || [];
   STATE.activeVehicleId = data.activeVehicleId || null;
   STATE.defaultUnit = data.defaultUnit || 'mi';
+  STATE.vehicles.forEach(migrateVehicle);
 }
 
 // Writes are fire-and-forget; a failure is surfaced instead of swallowed,
@@ -1664,7 +1706,8 @@ function carouselIndex(carousel) {
    Hand-pulled from techinfo.honda.com. Both 2023 hybrids share the 2.0 L
    Atkinson engine + e-CVT, so the Minder codes and most fluids match.
    The Maintenance Minder is a *mileage/condition* system — the only fixed
-   calendar rules in the manual are the two footnotes captured in `timed`.
+   calendar rules in the manual are two footnotes, applied as repeat
+   intervals on the roster (MANUAL_INTERVALS).
 ========================================================= */
 const MINDER_CODES = {
   A: { title: 'Replace engine oil' },
@@ -1702,10 +1745,6 @@ const MANUALS = {
       ['Washer fluid', '1.6 qt'],
     ],
     minder: ['A', 'B', 1, 2, 3, 4, 5, 6, 7],
-    timed: [
-      { title: 'Engine oil — 12-month max', months: 12 },
-      { title: 'Brake fluid — 3-year max', months: 36 },
-    ],
   },
   'accord-hybrid-2023': {
     name: '2023 Accord Hybrid',
@@ -1726,19 +1765,127 @@ const MANUALS = {
       ['Washer fluid', '1.6 qt'],
     ],
     minder: ['A', 'B', 1, 2, 3, 4, 5, 7],
-    timed: [
-      { title: 'Engine oil — 12-month max', months: 12 },
-      { title: 'Brake fluid — 3-year max', months: 36 },
-    ],
   },
 };
 
 // Quick-pick jobs for the service checklist
-const SERVICE_CATALOG = [
-  'Engine oil', 'Oil filter', 'Rotate tires', 'Engine air filter', 'Cabin air filter',
-  'Brake pads', 'Brake fluid', 'Wiper blades', '12V battery', 'Coolant', 'Spark plugs',
-  'Transmission fluid', 'Tires', 'Alignment', 'Inspection',
+/* =========================================================
+   SERVICE ROSTER
+   Every vehicle carries a standing list of service items (`v.items`). Each
+   has a status the user controls — needed / ok / ignored — plus optional
+   due date/mileage, a deferred flag, a priority flag, and a repeat interval.
+   Completing an item (via Log Service) resets it to ok and, if it has an
+   interval, schedules the next due. History lives in `v.services`.
+========================================================= */
+const ROSTER = [
+  { title: 'Engine oil & filter', codes: ['A', 'B'] },
+  { title: 'Rotate tires',        codes: [1] },
+  { title: 'Engine air filter',   codes: [2] },
+  { title: 'Cabin air filter',    codes: [2] },
+  { title: 'Transmission fluid',  codes: [3] },
+  { title: 'Spark plugs',         codes: [4] },
+  { title: 'Coolant',             codes: [5] },
+  { title: 'Rear differential fluid', codes: [6], onlyIfCode: 6 },
+  { title: 'Brake fluid',         codes: [7] },
+  { title: 'Inspection',          codes: ['B'] },
+  { title: 'Brake pads' },
+  { title: 'Wiper blades' },
+  { title: '12V battery' },
+  { title: 'Tires' },
+  { title: 'Alignment' },
 ];
+
+// Manual calendar rules, applied as repeat intervals on roster items
+const MANUAL_INTERVALS = { 'Engine oil & filter': 12, 'Brake fluid': 36 };
+
+const normTitle = t => String(t || '').toLowerCase().replace(/\s*\([a-b0-9]\)\s*$/i, '').replace(/^replace\s+/, '').trim();
+
+function findItem(v, title) {
+  const n = normTitle(title);
+  return (v.items || []).find(i => normTitle(i.title) === n);
+}
+
+// Make sure the vehicle has the standard roster (idempotent; safe on every render)
+function ensureRoster(v) {
+  v.items = v.items || [];
+  const manual = vehicleManual(v);
+  ROSTER.forEach(r => {
+    if (r.onlyIfCode && !(manual && manual.minder.includes(r.onlyIfCode))) return;
+    if (!findItem(v, r.title)) {
+      v.items.push({ id: uid(), title: r.title, status: 'ok', priority: false, deferred: false,
+                     dueDate: null, dueMileage: null, intervalMonths: null, intervalMiles: null, code: null, note: '' });
+    }
+  });
+  if (manual) Object.entries(MANUAL_INTERVALS).forEach(([t, months]) => {
+    const it = findItem(v, t);
+    if (it && it.intervalMonths == null) it.intervalMonths = months;
+  });
+  return v.items;
+}
+
+// One-time upgrade from the old reminders[] model
+function migrateVehicle(v) {
+  if (v.items) return;
+  v.items = [];
+  ensureRoster(v);
+  (v.reminders || []).filter(r => !r.done).forEach(r => {
+    const t = normTitle(r.title);
+    let targets = [];
+    if (/oil/.test(t)) targets = [findItem(v, 'Engine oil & filter')];
+    else if (/air.*cabin|cabin.*air/.test(t)) targets = [findItem(v, 'Engine air filter'), findItem(v, 'Cabin air filter')];
+    else if (/brake fluid/.test(t)) targets = [findItem(v, 'Brake fluid')];
+    else targets = [findItem(v, r.title)];
+    targets = targets.filter(Boolean);
+    if (!targets.length) {
+      v.items.push({ id: uid(), title: r.title, status: 'needed', priority: false, deferred: false,
+                     dueDate: r.dueDate || null, dueMileage: r.dueMileage || null, intervalMonths: null, intervalMiles: null, code: null, note: '', custom: true });
+      return;
+    }
+    targets.forEach(it => {
+      if (/-month max|-year max/.test(t)) { it.dueDate = it.dueDate || r.dueDate; return; } // calendar rule → just a due date
+      it.status = 'needed';
+      it.dueDate = r.dueDate || it.dueDate;
+      it.dueMileage = r.dueMileage || it.dueMileage;
+      const m = String(r.title).match(/\(([AB0-9])\)\s*$/);
+      if (m) it.code = m[1];
+    });
+  });
+  delete v.reminders;
+}
+
+// Latest logged service that included this item
+function lastDone(v, title) {
+  const n = normTitle(title);
+  return (v.services || [])
+    .filter(sv => serviceItems(sv).some(t => normTitle(t) === n))
+    .sort((a, b) => (b.date || 0) - (a.date || 0))[0] || null;
+}
+
+// Everything the UI needs to know about an item's current state
+function itemState(v, it) {
+  if (it.status === 'ignored') return { needed: false, ignored: true, text: 'Ignored', sortKey: 1e16, cls: 'ignored' };
+  const due = reminderDueIn(v, it);
+  const hasDue = !!(it.dueDate || it.dueMileage);
+  const needed = it.status === 'needed' || (hasDue && (due.overdue || due.soon));
+  let text, cls = '';
+  if (needed) {
+    text = it.deferred ? `Deferred · ${due.text}` : (hasDue ? due.text : 'Needed');
+    cls = due.overdue ? 'overdue' : (due.soon ? 'soon' : (it.deferred ? 'deferred' : ''));
+  } else if (hasDue) {
+    text = `Next · ${due.text}`;
+  } else {
+    const ld = lastDone(v, it.title);
+    text = ld ? `Last · ${fmtDate(ld.date)}` : 'Never logged';
+  }
+  let sortKey = hasDue ? due.sortKey : (needed ? -0.5 : 1e15);
+  if (it.priority && needed) sortKey -= 1e9;
+  return { needed, ignored: false, text, sortKey, cls, overdue: due.overdue && needed };
+}
+
+function neededItems(v) {
+  return ensureRoster(v).filter(i => itemState(v, i).needed)
+    .sort((a, b) => itemState(v, a).sortKey - itemState(v, b).sortKey);
+}
 
 function vehicleManual(v) {
   return v.manual ? MANUALS[v.manual] : null;
@@ -1768,16 +1915,16 @@ function minderOutputHTML(code, manual) {
   const valid = items.filter(i => !i.unknown);
   return html + (valid.length ? `
     <button class="btn-pill" style="margin-top:12px;width:100%;justify-content:center;" onclick="action.addMinderToNeeded()">
-      Add to Needed
+      Mark these as needed
     </button>` : '');
 }
 
-// Items a Minder code puts on the Needed list, e.g. B12 -> ['Engine oil & filter (B)', 'Rotate tires (1)', ...]
-function minderNeededItems(code, manual) {
-  return decodeMinder(code, manual).filter(i => !i.unknown).map(i => ({
-    title: `${i.title.replace('engine oil and oil filter', 'engine oil & filter').replace('engine air cleaner element and cabin (dust & pollen) filter', 'engine air & cabin filters')} (${i.code})`,
-    sub: i.sub || null,
-  }));
+// Roster items a Minder code refers to, e.g. B12 -> oil & filter, inspection, rotate, both filters
+function minderRosterTitles(code, manual) {
+  const codes = decodeMinder(code, manual).filter(i => !i.unknown).map(i => /\d/.test(i.code) ? Number(i.code) : i.code);
+  const out = [];
+  ROSTER.forEach(r => (r.codes || []).forEach(c => { if (codes.includes(c)) out.push({ title: r.title, code: String(c) }); }));
+  return out;
 }
 
 // Display line for a service entry: its items, or the legacy free-text title
@@ -1897,7 +2044,6 @@ function renderVehicleDetail() {
       <div class="tabs">
         <button class="tab ${tab==='overview'?'active':''}" onclick="action.setDetailTab('overview')">Overview</button>
         <button class="tab ${tab==='services'?'active':''}" onclick="action.setDetailTab('services')">Service</button>
-        <button class="tab ${tab==='reminders'?'active':''}" onclick="action.setDetailTab('reminders')">Needed</button>
         <button class="tab ${tab==='media'?'active':''}" onclick="action.setDetailTab('media')">Media</button>
       </div>
 
@@ -1910,7 +2056,7 @@ function renderDetailTab(v, tab) {
   switch (tab) {
     case 'overview': return renderOverviewTab(v);
     case 'services': return renderServicesTab(v);
-    case 'reminders': return renderRemindersTab(v);
+    case 'reminders': return renderServicesTab(v);
     case 'media': return renderMediaTab(v);
   }
   return '';
@@ -1918,9 +2064,7 @@ function renderDetailTab(v, tab) {
 
 function renderOverviewTab(v) {
   const recentService = (v.services || []).slice().sort((a,b) => (b.date || 0) - (a.date || 0))[0];
-  const upcomingReminders = (v.reminders || []).filter(r => !r.done)
-    .sort((a, b) => reminderDueIn(v, a).sortKey - reminderDueIn(v, b).sortKey)
-    .slice(0, 3);
+  const upcomingReminders = neededItems(v).slice(0, 3);
   const totalSpent = (v.services || []).reduce((sum, s) => sum + (Number(s.cost) || 0), 0);
   const manual = vehicleManual(v);
 
@@ -1958,7 +2102,7 @@ function renderOverviewTab(v) {
     ${v.note ? `<div class="note-display">${escapeHtml(v.note)}</div>` : `<div class="empty" style="padding:20px 0;"><div class="empty-sub">No notes yet. Tap edit to add one.</div></div>`}
 
     <h2 class="section-title">Needed</h2>
-    ${upcomingReminders.length ? upcomingReminders.map(r => reminderItemHTML(v, r)).join('') :
+    ${upcomingReminders.length ? upcomingReminders.map(r => neededRowHTML(v, r)).join('') :
       `<div class="empty" style="padding:20px 0;"><div class="empty-sub">Nothing needed right now.</div></div>`}
 
     ${recentService ? `
@@ -1969,43 +2113,40 @@ function renderOverviewTab(v) {
 }
 
 function renderServicesTab(v) {
-  const services = (v.services || []).slice().sort((a,b) => (b.date || 0) - (a.date || 0));
-  return `
-    <button class="btn-pill" onclick="action.openSheet('newService')" style="margin-bottom:16px;">
-      <span style="font-size:18px;line-height:0">+</span> Log service
-    </button>
-    ${services.length ? services.map(s => serviceItemHTML(v, s)).join('') :
-      `<div class="empty"><div class="empty-icon">🔧</div><div class="empty-title">No services logged</div><div class="empty-sub">Track oil changes, repairs, tires, anything.</div></div>`
-    }
-  `;
-}
+  const items = ensureRoster(v);
+  const needed = neededItems(v);
+  const rest = items.filter(i => !itemState(v, i).needed && i.status !== 'ignored')
+    .sort((a, b) => itemState(v, a).sortKey - itemState(v, b).sortKey || a.title.localeCompare(b.title));
+  const ignored = items.filter(i => i.status === 'ignored');
+  const history = (v.services || []).slice().sort((a,b) => (b.date || 0) - (a.date || 0));
+  const unit = v.unit || STATE.defaultUnit;
 
-function openNeeded(v) {
-  return (v.reminders || []).filter(r => !r.done)
-    .sort((a, b) => reminderDueIn(v, a).sortKey - reminderDueIn(v, b).sortKey);
-}
-
-function renderRemindersTab(v) {
-  const needed = openNeeded(v);
-  const manual = vehicleManual(v);
-  const missingTimed = manual ? manual.timed.filter(t => !(v.reminders || []).some(r => !r.done && r.title === t.title)) : [];
   return `
-    <div style="display:flex;gap:8px;margin-bottom:16px;">
-      <button class="btn-pill" onclick="action.openSheet('newReminder')" style="flex:1;justify-content:center;">
-        <span style="font-size:18px;line-height:0">+</span> Add item
+    <div style="display:flex;gap:8px;margin-bottom:6px;">
+      <button class="btn-pill" onclick="action.openSheet('newService')" style="flex:1;justify-content:center;">
+        <span style="font-size:18px;line-height:0">+</span> Log service
       </button>
-      ${needed.length ? `<button class="btn-pill" onclick="action.openSheet('newService')" style="flex:1;justify-content:center;background:transparent;color:var(--text);border:1px solid var(--line-2);">Log service</button>` : ''}
+      <button class="btn-pill" onclick="action.openSheet('item')" style="flex:1;justify-content:center;background:transparent;color:var(--text);border:1px solid var(--line-2);">
+        Add item
+      </button>
     </div>
-    ${missingTimed.length ? `
-      <button class="btn-pill" onclick="action.addManualReminders()" style="margin:-6px 0 16px;width:100%;justify-content:center;background:transparent;color:var(--text-2);border:1px solid var(--line);">
-        Add the manual's time-based items
-      </button>
-      <div class="help-text" style="margin:-10px 0 16px;">The Maintenance Minder tracks mileage, not calendar time. The manual also says: ${manual.timed.map(t => t.title.replace(' — ', ' every ').replace('-month max', ' months').replace('-year max', ' years')).join('; ')}.</div>
-    ` : ''}
-    ${needed.length ? needed.map(r => reminderItemHTML(v, r)).join('') :
-      `<div class="empty"><div class="empty-icon">🔔</div><div class="empty-title">Nothing needed</div><div class="empty-sub">Type a Maintenance Minder code on Overview, or add an item by date or mileage.</div></div>`
-    }
-    <div class="help-text" style="text-align:center;margin-top:8px;">Tap the circle on an item when it's done — it goes into the service log.</div>
+
+    <h2 class="section-title">Needed<span class="count">${needed.length}</span></h2>
+    ${needed.length ? needed.map(i => neededRowHTML(v, i)).join('') :
+      `<div class="empty" style="padding:16px 0;"><div class="empty-sub">Nothing needed. Tap any item below to mark it needed, or type a Maintenance Minder code on Overview.</div></div>`}
+
+    <h2 class="section-title">Everything else</h2>
+    <div class="roster">
+      ${rest.map(i => rosterRowHTML(v, i)).join('')}
+    </div>
+    ${ignored.length ? `
+      <div class="roster" style="opacity:.6;">
+        ${ignored.map(i => rosterRowHTML(v, i)).join('')}
+      </div>` : ''}
+
+    <h2 class="section-title">History<span class="count">${history.length}</span></h2>
+    ${history.length ? history.map(sv => serviceItemHTML(v, sv)).join('') :
+      `<div class="empty" style="padding:16px 0;"><div class="empty-sub">No services logged yet.</div></div>`}
   `;
 }
 
@@ -2044,25 +2185,33 @@ function serviceItemHTML(v, s) {
   `;
 }
 
-function reminderItemHTML(v, r) {
-  const due = reminderDueIn(v, r);
-  const cls = r.done ? '' : (due.overdue ? 'overdue' : (due.soon ? 'soon' : ''));
+// Needed items: colored bar, due text, circle = log it as done
+function neededRowHTML(v, it) {
+  const st = itemState(v, it);
   return `
-    <div class="reminder-item ${cls}">
-      <div style="flex:1;min-width:0;" onclick="action.openSheet('editReminder', { id: '${r.id}' })">
-        <div class="rtitle" style="${r.done ? 'text-decoration:line-through;color:var(--text-3)' : ''}">${escapeHtml(r.title)}</div>
-        <div class="rmeta">${due.text}</div>
+    <div class="reminder-item ${st.cls} ${it.priority ? 'priority' : ''}">
+      <div style="flex:1;min-width:0;" onclick="action.openSheet('item', { id: '${it.id}' })">
+        <div class="rtitle">${escapeHtml(it.title)}${it.code ? `<span class="code">${it.code}</span>` : ''}</div>
+        <div class="rmeta">${st.text}</div>
       </div>
-      <button class="check-btn" onclick="action.openSheet('newService', { check: '${r.id}' })" aria-label="Done">
-        ${r.done ? ICON.check : ''}
-      </button>
+      <button class="check-btn" onclick="action.openSheet('newService', { check: '${it.id}' })" aria-label="Done"></button>
+    </div>
+  `;
+}
+
+// Everything-else rows: title + last done / next due
+function rosterRowHTML(v, it) {
+  const st = itemState(v, it);
+  return `
+    <div class="roster-row ${st.ignored ? 'ignored' : ''}" onclick="action.openSheet('item', { id: '${it.id}' })">
+      <div class="rt">${escapeHtml(it.title)}</div>
+      <div class="rl">${st.text}</div>
     </div>
   `;
 }
 
 function reminderDueIn(v, r) {
   // Returns { text, overdue, soon, sortKey }
-  if (r.done) return { text: 'Done', overdue: false, soon: false, sortKey: 1e15 };
   const parts = [];
   let overdue = false, soon = false, sortKey = 1e14;
 
@@ -2086,9 +2235,9 @@ function reminderDueIn(v, r) {
   return { text: parts.join(' · '), overdue, soon, sortKey };
 }
 
-// Does this vehicle have any overdue reminders?
+// Does this vehicle have any overdue needed item? (drives the red dot on Home)
 function vehicleHasOverdue(v) {
-  return (v.reminders || []).some(r => !r.done && reminderDueIn(v, r).overdue);
+  return ensureRoster(v).some(i => itemState(v, i).overdue);
 }
 
 // ---------- Services tab (all vehicles aggregated) ----------
@@ -2180,11 +2329,9 @@ function renderSheet() {
       body = sheetServiceForm(s);
       break;
     }
-    case 'newReminder': body = sheetReminderForm(null); break;
-    case 'editReminder': {
+    case 'item': {
       const v = getActiveVehicle();
-      const r = (v.reminders || []).find(x => x.id === payload.id);
-      body = sheetReminderForm(r);
+      body = sheetItemForm(payload.id ? (v.items || []).find(x => x.id === payload.id) : null);
       break;
     }
     case 'photoView': {
@@ -2343,9 +2490,9 @@ function sheetServiceForm(existing, checkId) {
   // New: the car's Needed list as a checklist. Edit: the entry's own items.
   const rows = isEdit
     ? serviceItems(s).map((t, i) => ({ key: `i${i}`, title: t, sub: null }))
-    : openNeeded(v).map(r => ({ key: r.id, title: r.title, sub: reminderDueIn(v, r).text }));
-  const rowTitles = new Set(rows.map(r => r.title));
-  const chips = SERVICE_CATALOG.filter(c => !rowTitles.has(c));
+    : neededItems(v).map(it => ({ key: it.id, title: it.title, sub: itemState(v, it).text }));
+  const rowTitles = new Set(rows.map(r => normTitle(r.title)));
+  const chips = ensureRoster(v).filter(i => i.status !== 'ignored' && !rowTitles.has(normTitle(i.title))).map(i => i.title);
 
   return `
     <div class="sheet-header">
@@ -2365,7 +2512,7 @@ function sheetServiceForm(existing, checkId) {
           </div>
           <div class="tag">${svc.checked.has(r.key) ? 'Done' : (isEdit ? 'Remove' : 'Later')}</div>
         </div>`).join('')}
-      ${isEdit ? '' : `<div class="help-text">Anything left on "Later" stays on the Needed list.</div>`}
+      ${isEdit ? '' : `<div class="help-text">Anything left on "Later" stays needed.</div>`}
     </div>` : ''}
 
     <div class="field">
@@ -2427,38 +2574,80 @@ function updateSvcChips() {
   });
 }
 
-function sheetReminderForm(existing) {
-  const r = existing || {};
+function sheetItemForm(existing) {
+  const v = getActiveVehicle();
+  const it = existing || { status: 'needed', priority: false, deferred: false };
   const isEdit = !!existing;
-  const dateStr = toDateInput(r.dueDate);
+  const ld = isEdit ? lastDone(v, it.title) : null;
+  const unit = v.unit || STATE.defaultUnit;
+  const isCustom = !isEdit || it.custom || !ROSTER.some(r => normTitle(r.title) === normTitle(it.title));
   return `
     <div class="sheet-header">
-      <div class="sheet-title">${isEdit ? 'Edit Item' : 'Needed Item'}</div>
+      <div class="sheet-title">${isEdit ? escapeHtml(it.title) : 'New Service Item'}</div>
       <button class="close-btn" onclick="action.closeSheet()">×</button>
+    </div>
+    ${ld ? `<div class="last-done">Last done ${fmtDate(ld.date)}${ld.mileage ? ` · ${fmtNum(ld.mileage)} ${unit}` : ''}</div>` : (isEdit ? `<div class="last-done">Never logged</div>` : '')}
+
+    ${isCustom ? `
+    <div class="field">
+      <label class="label">Item</label>
+      <input class="input" id="f-ititle" placeholder="Registration, detailing, recall…" value="${escapeHtml(it.title || '')}">
+    </div>` : `<input type="hidden" id="f-ititle" value="${escapeHtml(it.title)}">`}
+
+    <div class="field">
+      <label class="label">Status</label>
+      <div class="seg wide" id="f-istatus">
+        <button type="button" class="${it.status === 'needed' ? 'active' : ''}" data-status="needed" onclick="action.setItemStatus('needed')">Needed</button>
+        <button type="button" class="${it.status === 'ok' ? 'active muted' : ''}" data-status="ok" onclick="action.setItemStatus('ok')">OK</button>
+        <button type="button" class="${it.status === 'ignored' ? 'active danger' : ''}" data-status="ignored" onclick="action.setItemStatus('ignored')">Ignore</button>
+      </div>
+      <div class="help-text">Needed puts it at the top. OK means it's fine until its next due. Ignore hides it for this car.</div>
     </div>
 
     <div class="field">
-      <label class="label">What's needed</label>
-      <input class="input" id="f-rtitle" placeholder="Oil change, registration renewal…" value="${escapeHtml(r.title || '')}">
+      <div class="toggle-row ${it.priority ? 'on' : ''}" id="f-ipriority" onclick="action.toggleItemPriority()">
+        <span>High priority</span><span class="sw"></span>
+      </div>
     </div>
 
     <div class="field">
       <label class="label">Due by date</label>
-      <input class="input" id="f-rdate" type="date" value="${dateStr}">
+      <input class="input" id="f-idate" type="date" value="${toDateInput(it.dueDate)}">
+      <label class="label" style="margin-top:12px;">Due at mileage</label>
+      <input class="input" id="f-imileage" type="number" inputmode="numeric" placeholder="${v.mileage ? fmtNum(v.mileage + 5000).replace(/,/g, '') : '90000'}" value="${it.dueMileage ?? ''}">
+      <div class="quick-row">
+        <button type="button" class="chip" onclick="action.deferItem(1, 0)">Defer 1 mo</button>
+        <button type="button" class="chip" onclick="action.deferItem(3, 0)">3 mo</button>
+        <button type="button" class="chip" onclick="action.deferItem(6, 0)">6 mo</button>
+        <button type="button" class="chip" onclick="action.deferItem(0, 1000)">+1,000 ${unit}</button>
+        <button type="button" class="chip" onclick="action.deferItem(0, 5000)">+5,000 ${unit}</button>
+      </div>
+      <input type="hidden" id="f-ideferred" value="${it.deferred ? '1' : ''}">
     </div>
 
     <div class="field">
-      <label class="label">Due at mileage</label>
-      <input class="input" id="f-rmileage" type="number" inputmode="numeric" placeholder="90000" value="${r.dueMileage ?? ''}">
-      <div class="help-text">Optional. Set either or both — it alerts on whichever comes first.</div>
+      <label class="label">Repeats</label>
+      <div class="input-row" style="gap:8px;">
+        <input class="input" id="f-imonths" type="number" inputmode="numeric" placeholder="months" value="${it.intervalMonths ?? ''}">
+        <input class="input" id="f-imiles" type="number" inputmode="numeric" placeholder="${unit}" value="${it.intervalMiles ?? ''}">
+      </div>
+      <div class="help-text">When you log this as done, the next due is set this far out. Either, both, or neither.</div>
     </div>
 
-    <button class="btn-primary" onclick="action.saveReminder(${isEdit ? `'${r.id}'` : 'null'})">
-      ${isEdit ? 'Save Changes' : 'Add to Needed'}
-    </button>
+    <div class="field">
+      <label class="label">Notes</label>
+      <textarea class="textarea" id="f-inote" placeholder="Part numbers, which shop, what to watch for…">${escapeHtml(it.note || '')}</textarea>
+    </div>
 
     ${isEdit ? `
-      <button class="btn-danger-text" style="margin-top:12px;" onclick="action.deleteReminder('${r.id}')">
+      <button class="btn-primary" onclick="action.openSheet('newService', { check: '${it.id}' })">Log as done</button>
+      <button class="btn-ghost" style="width:100%;margin-top:10px;" onclick="action.saveItem('${it.id}')">Save</button>
+    ` : `
+      <button class="btn-primary" onclick="action.saveItem(null)">Add Item</button>
+    `}
+
+    ${isEdit && isCustom ? `
+      <button class="btn-danger-text" style="margin-top:12px;" onclick="action.deleteItem('${it.id}')">
         Remove Item
       </button>
     ` : ''}
@@ -2610,18 +2799,22 @@ const action = {
   addMinderToNeeded() {
     const v = getActiveVehicle(), manual = v && vehicleManual(v);
     if (!manual) return;
-    v.reminders = v.reminders || [];
-    let added = 0;
-    minderNeededItems(STATE._minderCode, manual).forEach(item => {
-      if (v.reminders.some(r => !r.done && r.title === item.title)) return;
-      v.reminders.push({ id: uid(), title: item.title, dueDate: fromDateInput(toDateInput(Date.now())), dueMileage: null, done: false });
-      added++;
+    ensureRoster(v);
+    let marked = 0;
+    minderRosterTitles(STATE._minderCode, manual).forEach(({ title, code }) => {
+      const it = findItem(v, title);
+      if (!it || it.status === 'ignored') return;
+      if (it.status !== 'needed') marked++;
+      it.status = 'needed';
+      it.deferred = false;
+      it.code = code;
+      if (!it.dueDate && !it.dueMileage) it.dueDate = fromDateInput(toDateInput(Date.now()));
     });
     persist();
     STATE._minderCode = '';
-    STATE.detailTab = 'reminders';
+    STATE.detailTab = 'services';
     render();
-    toast(added ? `${added} item${added === 1 ? '' : 's'} added to Needed` : 'Already on the list');
+    toast(marked ? `${marked} item${marked === 1 ? '' : 's'} marked needed` : 'Already needed');
   },
 
   // --- service checklist (patches DOM; never re-renders the open sheet) ---
@@ -2652,21 +2845,62 @@ const action = {
     updateSvcChips();
   },
 
-  addManualReminders() {
-    const v = getActiveVehicle();
-    const manual = vehicleManual(v);
-    if (!manual) return;
-    v.reminders = v.reminders || [];
-    let added = 0;
-    manual.timed.forEach(t => {
-      if (v.reminders.some(r => !r.done && r.title === t.title)) return;
-      const due = new Date(); due.setMonth(due.getMonth() + t.months);
-      v.reminders.push({ id: uid(), title: t.title, dueDate: due.getTime(), dueMileage: null, done: false });
-      added++;
+  // --- item sheet (patches DOM; the form is read on save) ---
+  setItemStatus(status) {
+    document.querySelectorAll('#f-istatus button').forEach(b => {
+      const on = b.dataset.status === status;
+      b.className = on ? `active ${status === 'ignored' ? 'danger' : status === 'ok' ? 'muted' : ''}` : '';
     });
+  },
+  toggleItemPriority() {
+    document.getElementById('f-ipriority').classList.toggle('on');
+  },
+  deferItem(months, miles) {
+    const v = getActiveVehicle();
+    if (months) {
+      const d = new Date(); d.setMonth(d.getMonth() + months);
+      $('#f-idate').value = toDateInput(d.getTime());
+    }
+    if (miles) $('#f-imileage').value = Number(v.mileage || 0) + miles;
+    $('#f-ideferred').value = '1';
+    action.setItemStatus('needed');
+  },
+  saveItem(id) {
+    const v = getActiveVehicle();
+    ensureRoster(v);
+    const title = $('#f-ititle').value.trim();
+    if (!title) { alert('Give the item a name.'); return; }
+    const status = document.querySelector('#f-istatus button.active')?.dataset.status || 'needed';
+    const data = {
+      title,
+      status,
+      priority: document.getElementById('f-ipriority').classList.contains('on'),
+      dueDate: fromDateInput($('#f-idate').value),
+      dueMileage: $('#f-imileage').value ? Number($('#f-imileage').value) : null,
+      deferred: status === 'needed' && $('#f-ideferred').value === '1',
+      intervalMonths: $('#f-imonths').value ? Number($('#f-imonths').value) : null,
+      intervalMiles: $('#f-imiles').value ? Number($('#f-imiles').value) : null,
+      note: $('#f-inote').value,
+    };
+    if (id) {
+      Object.assign(v.items.find(x => x.id === id), data);
+    } else {
+      if (findItem(v, title)) { alert('That item is already on the list.'); return; }
+      v.items.push({ id: uid(), code: null, custom: true, ...data });
+    }
     persist();
+    STATE.sheet = null;
     render();
-    toast(`${added} reminder${added === 1 ? '' : 's'} added`);
+    toast(id ? 'Saved' : 'Item added');
+  },
+  deleteItem(id) {
+    if (!confirm('Remove this item from the list?')) return;
+    const v = getActiveVehicle();
+    v.items = v.items.filter(i => i.id !== id);
+    persist();
+    STATE.sheet = null;
+    render();
+    toast('Removed');
   },
 
   async stageHeroPhoto(file) {
@@ -2751,13 +2985,9 @@ const action = {
       // Migration: drop legacy "name" field if present
       delete v.name;
     } else {
-      STATE.vehicles.push({
-        id: uid(),
-        ...data,
-        photos: [],
-        services: [],
-        reminders: []
-      });
+      const nv = { id: uid(), ...data, photos: [], services: [], items: [] };
+      ensureRoster(nv);
+      STATE.vehicles.push(nv);
     }
     persist();
     STATE.sheet = null;
@@ -2784,11 +3014,10 @@ const action = {
     const v = getActiveVehicle();
     const svc = STATE._svc;
     v.services = v.services || [];
-    v.reminders = v.reminders || [];
     const existing = id ? v.services.find(x => x.id === id) : null;
 
     // Items = ticked rows + chips + free-text, de-duplicated
-    const doneNeeded = id ? [] : v.reminders.filter(r => svc.checked.has(r.id));
+    const doneNeeded = id ? [] : ensureRoster(v).filter(it => svc.checked.has(it.id));
     const keptItems = id ? serviceItems(existing).filter((_, i) => svc.checked.has(`i${i}`)) : doneNeeded.map(r => r.title);
     const items = [...new Set([...keptItems, ...svc.chips, ...svc.extra])];
     if (!items.length) { alert('Tick or add at least one item.'); return; }
@@ -2810,15 +3039,15 @@ const action = {
       v.services.push(entry);
       if (data.mileage && (!v.mileage || data.mileage > v.mileage)) v.mileage = data.mileage;
 
-      // Ticked Needed items are complete; anything on "Later" is untouched
-      doneNeeded.forEach(r => { r.done = true; r.completedAt = date; r.serviceId = entry.id; });
-
-      // The manual's calendar rules roll forward from this service
-      const manual = vehicleManual(v);
-      if (manual) manual.timed.forEach(t => {
-        if (!doneNeeded.some(r => r.title === t.title)) return;
-        const due = new Date(date); due.setMonth(due.getMonth() + t.months);
-        v.reminders.push({ id: uid(), title: t.title, dueDate: due.getTime(), dueMileage: null, done: false });
+      // Every roster item in this entry (ticked or chip) is now OK; if it
+      // repeats, the next due is set from this service. "Later" rows are untouched.
+      items.forEach(t => {
+        const it = findItem(v, t);
+        if (!it) return;
+        it.status = 'ok'; it.deferred = false; it.priority = false; it.code = null;
+        it.dueDate = null; it.dueMileage = null;
+        if (it.intervalMonths) { const d = new Date(date); d.setMonth(d.getMonth() + it.intervalMonths); it.dueDate = d.getTime(); }
+        if (it.intervalMiles && data.mileage) it.dueMileage = data.mileage + it.intervalMiles;
       });
     }
     persist();
@@ -2832,39 +3061,6 @@ const action = {
     if (!confirm('Delete this service entry?')) return;
     const v = getActiveVehicle();
     v.services = (v.services || []).filter(s => s.id !== id);
-    persist();
-    STATE.sheet = null;
-    render();
-    toast('Deleted');
-  },
-
-  saveReminder(id) {
-    const v = getActiveVehicle();
-    const title = $('#f-rtitle').value.trim();
-    if (!title) { alert('Title is required.'); return; }
-    const dateVal = $('#f-rdate').value;
-    const data = {
-      title,
-      dueDate: fromDateInput(dateVal),
-      dueMileage: $('#f-rmileage').value ? Number($('#f-rmileage').value) : null,
-    };
-    v.reminders = v.reminders || [];
-    if (id) {
-      const r = v.reminders.find(x => x.id === id);
-      Object.assign(r, data);
-    } else {
-      v.reminders.push({ id: uid(), done: false, ...data });
-    }
-    persist();
-    STATE.sheet = null;
-    render();
-    toast(id ? 'Reminder updated' : 'Reminder set');
-  },
-
-  deleteReminder(id) {
-    if (!confirm('Delete this reminder?')) return;
-    const v = getActiveVehicle();
-    v.reminders = (v.reminders || []).filter(r => r.id !== id);
     persist();
     STATE.sheet = null;
     render();

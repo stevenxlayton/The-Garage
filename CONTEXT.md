@@ -35,52 +35,50 @@ STATE → STORAGE → UTILS → ICONS → OWNER'S MANUAL DATA → SCREENS → SH
 - Vehicle shape: `{id, year, make, model, trim, plate, mileage, unit, vin, note,
   heroPhoto, heroFloating, photos[], services[], reminders[]}`
 - `vehicle.manual` is an optional key into `MANUALS` (see below).
-- Service: `{id, items[], title, date, mileage, cost, note}` — `items` is the
-  list of what was done; `title` is a derived join kept for older entries and
-  the global Services list. Reminder ("Needed" item): `{id, title, dueDate,
-  dueMileage, done, completedAt, serviceId}`. Dates are ms timestamps at
+- Service (history entry): `{id, items[], title, date, mileage, cost, note}` —
+  `items` is what was done; `title` is a derived join kept for older entries
+  and the global Services list.
+- Service item (roster entry, `v.items[]`): `{id, title, status, priority,
+  deferred, dueDate, dueMileage, intervalMonths, intervalMiles, code, note,
+  custom}`. `status` is `needed | ok | ignored`. Dates are ms timestamps at
   **local** midnight — always go through `fromDateInput` / `toDateInput`.
 
-### The Needed → Service flow
+### The Service tab
 
-The "Reminders" tab is labelled **Needed**: it's the car's to-do list. Items
-get there from the Minder decoder ("Add to Needed"), the manual's calendar
-rules, or by hand. **Log Service** is a checklist of those open items — tick
-what was done, the rest stay on "Later" — plus quick-pick chips
-(`SERVICE_CATALOG`) and a free-text add. Saving marks the ticked items
-`done` (hidden from Needed, kept in data with `serviceId`), and any completed
-manual calendar rule is re-created dated from the service. Tapping the circle
-on a Needed row opens the same sheet with that item pre-ticked; there is no
-"mark done" that bypasses the log. Checklist state lives in `STATE._svc` and
-toggles patch the DOM — same no-re-render rule as every other sheet.
+One tab holds everything about maintenance. Every vehicle carries a standing
+**roster** of service items (`ROSTER`, seeded by `ensureRoster()` — idempotent,
+called on render). The tab shows:
 
-### Render rules that keep the UI from flickering
+1. **Needed** — items whose `itemState()` is needed: status `needed`, or
+   status `ok` with a due date/mileage that is overdue or within 14 days.
+   Sorted priority first, then urgency. Colored bar: red overdue, amber soon,
+   grey deferred.
+2. **Everything else** — the rest of the roster with "Next · …" (has a due)
+   or "Last · date" (from history) or "Never logged". Ignored items in a
+   dimmed group at the bottom.
+3. **History** — the logged services.
 
-- `render()` compares a screen key (`v:<id>` or `t:<tab>`) to the previous one.
-  Same screen → `#app.no-anim` (no entrance animation) and scroll position is kept.
-- **Never call `render()` while a sheet is open** unless you're closing it.
-  Rebuilding the sheet throws away everything the user has typed. In-sheet
-  actions (`toggleVehicleUnit`, `stageHeroPhoto`, `clearHeroPhoto`) patch the
-  DOM directly instead.
-- `toast()` writes to `#toast`, outside `#app`, so it never triggers a render.
-- The carousel index is read off the live DOM at the top of `render()` so
-  Home → Services → Home lands on the same car.
+Tapping any item opens the **item sheet**: status (Needed / OK / Ignore),
+high-priority toggle, due date/mileage, defer quick-picks (set the due and
+flag `deferred`), repeat interval, notes, and **Log as done**. Custom items can
+be removed; roster items can only be ignored.
 
-## Owner's manual data
+**Log Service** is a checklist: every needed item is a row (Done / Later),
+every other non-ignored roster item is a chip, plus free text for one-offs.
+Saving records the entry and resets each included roster item to `ok`
+(clearing due/deferred/priority/code); if the item has an interval, the next
+due is set from the service date/mileage. "Later" rows are untouched. The
+circle on a Needed row opens this sheet with that item pre-ticked — there is
+no "mark done" that bypasses the log.
 
-`MANUALS` holds hand-pulled data from techinfo.honda.com for the two cars in
-the garage (2023 CR-V Hybrid, 2023 Accord Hybrid): specs (oil, plugs, tires,
-fluids), which Maintenance Minder codes apply, the manual URL, and the manual's
-two calendar rules (oil ≤ 12 months, brake fluid ≤ 3 years — the Minder itself
-only tracks mileage/condition). `MINDER_CODES` is the shared A/B/1–7 decoder.
+The Minder decoder's "Mark these as needed" flips the matching roster items
+(via `ROSTER[].codes`) to needed with the code badge; it never creates items.
+The manual's calendar rules live in `MANUAL_INTERVALS` and are applied as
+repeat intervals on Engine oil & filter (12 mo) and Brake fluid (36 mo).
 
-A vehicle opts in via the "Owner's manual data" select in its form
-(auto-suggested from make/model). With a manual set, Overview shows a Minder
-decoder (type "B12" → what's due → "Log this service" pre-fills the entry) and
-a specs list; the Reminders tab offers to add the timed reminders.
-
-Adding another car = another `MANUALS` entry. The source pages are behind a
-terms-of-use click on Honda's site; the numbers were transcribed, not scraped.
+`migrateVehicle()` upgrades pre-roster data (`reminders[]`) on load.
+Checklist and item-sheet state patch the DOM — same no-re-render rule as
+every other sheet.
 
 ## Design language
 
@@ -151,8 +149,10 @@ The no-photo placeholder is a base64 PNG car silhouette embedded in
 - Photos are still base64 strings inside the one state blob, so every
   `persist()` rewrites all of them. Fine at tens of photos; if it ever feels
   slow, split photos into their own IDB records.
-- Done Needed items are hidden, not shown anywhere except via the service
-  they were logged with. No "completed" view yet.
+- Roster items match history by normalized title (`normTitle`), so renaming a
+  custom item orphans its "Last · …" lookup.
+- The manual's calendar intervals only start counting after the first logged
+  service of that item (no way to know when it was last done before the app).
 - In-app cutout is verified on desktop Chrome only. Needs a real run on iOS
   Safari (memory pressure on the ~40 MB model is the risk).
 
