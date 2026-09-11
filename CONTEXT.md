@@ -7,8 +7,11 @@ custom fields).
 ## Hard constraints
 
 - **One HTML file.** No build step, no bundler, no npm. `index.html` is the app.
-- **No external runtime deps.** Google Fonts (Sora + JetBrains Mono) is the only
-  network request. Everything else is inline or base64.
+- **No external runtime deps for the app itself.** Google Fonts (Sora +
+  JetBrains Mono) is the only network request on load. Everything else is inline
+  or base64. The one exception is the on-demand "Cut out car" button, which
+  lazy-loads a background-removal model from a CDN — the app works fully
+  without it.
 - **On-device storage only.** No backend, no accounts, no sync. IndexedDB is the
   primary store (localStorage is a best-effort mirror and the migration source
   for pre-IDB data). JSON export/import in Settings is the backup mechanism.
@@ -77,18 +80,33 @@ Bottom nav (Home / Services / Settings) stays. That's the only chrome.
 - **Opaque image** → full-bleed `object-fit: cover` with a gradient overlay.
   Saved as JPEG at 0.82 for size.
 
-Cutouts are produced externally (ChatGPT, any photo editor) and imported. The app
-does not remove backgrounds itself — see below.
+Cutouts can be made in-app ("Cut out car" in the vehicle form) or externally
+(iOS Photos → press-and-hold the car → Copy Subject; ChatGPT; any editor) and
+imported. Transparent images are cropped to their visible pixels on import
+(`alphaBounds`) so cutouts with big transparent margins still fill the frame.
+
+**In-app cutout** uses `@imgly/background-removal` (ISNet, `isnet_quint8`),
+dynamically `import()`ed from jsdelivr on first tap, ~40 MB of model + ONNX
+runtime downloaded once and browser-cached. `proxyToWorker: false` is
+mandatory — the worker path throws `DataCloneError` on iOS Safari (this is what
+killed the first attempt). Runs on the main thread, ~10 s on a laptop; slower on
+a phone. Threaded WASM is unavailable on GitHub Pages (no COOP/COEP headers) so
+it's single-threaded. "Use original photo" reverts to the pre-cutout image
+until the sheet is saved or closed.
+
+Plain (opaque) photos on the home screen render as a framed print in the stall
+(86% width, rounded) rather than full-bleed — full-bleed made every photo look
+enormous.
 
 The no-photo placeholder is a base64 PNG car silhouette embedded in
 `CAR_SILHOUETTE`, rendered with `filter: invert(1)` and 35% opacity.
 
 ## Tried and rejected — don't redo these
 
-- **`@imgly/background-removal`** — throws `DataCloneError: The object can not be
-  cloned` on iOS Safari. Web Worker postMessage incompatibility. Removed. Any
-  in-browser background removal needs to be verified on real iOS Safari before
-  it goes in.
+- **`@imgly/background-removal` with its default worker** — throws
+  `DataCloneError: The object can not be cloned` on iOS Safari. Now used with
+  `proxyToWorker: false` instead (see Photo handling). If it misbehaves on the
+  phone (memory, hang), that flag is the first thing to check, not the library.
 - **`capture="environment"` on file inputs** — forces the camera and blocks the
   photo library. All file inputs must omit it.
 - **Hand-drawn SVG car silhouettes** — attempted twice, both looked terrible.
@@ -102,6 +120,8 @@ The no-photo placeholder is a base64 PNG car silhouette embedded in
   `persist()` rewrites all of them. Fine at tens of photos; if it ever feels
   slow, split photos into their own IDB records.
 - Reminders marked done stay in the list (struck through) forever. No archive.
+- In-app cutout is verified on desktop Chrome only. Needs a real run on iOS
+  Safari (memory pressure on the ~40 MB model is the risk).
 
 ## iOS specifics
 
